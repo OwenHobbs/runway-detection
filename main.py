@@ -24,6 +24,18 @@ def compute_lateral_error(left, right, frame_width, ref_y):
     lateral_error_norm = (image_center_x - centerline_x) / half_width
     return lateral_error_norm  # +1 = 1 runway-width right, -1 = left
 
+def is_coincident(x1, y1, x2, y2, threshold=10.0):
+    return abs(x2 - x1) < threshold and abs(y2 - y1) < threshold
+
+def is_corner(line1, line2, threshold=10.0):
+    x1, y1, x2, y2 = line1
+    x3, y3, x4, y4 = line2
+    if is_coincident(x1, y1, x3, y3, threshold): return True
+    if is_coincident(x1, y1, x4, y4, threshold): return True
+    if is_coincident(x2, y2, x3, y3, threshold): return True
+    if is_coincident(x2, y2, x4, y4, threshold): return True
+    return False
+
 def detect_runway_edges(frame):
     # Preprocess
     gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
@@ -63,21 +75,43 @@ def detect_runway_edges(frame):
             # line is vertical
             vertical_lines.append((x1, y1, x2, y2))
             # draw it blue
-            cv.line(output_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+            # cv.line(output_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
         else:
             # line is horizontal
             horizontal_lines.append((x1, y1, x2, y2))
             # draw it red
-            cv.line(output_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            # cv.line(output_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
-    if len(vertical_lines) < 2:
+    # sort horizontal_lines using average of y1 and y2
+    horizontal_lines = sorted(horizontal_lines, key=lambda L: (L[1] + L[3]) / 2.0, reverse=True)
+
+    # loop through horizontal lines bottom up until at least two connected edges are found
+    possible_lines = []
+    for horizontal_line in horizontal_lines:
+        connected_lines = [] # reset
+        for line in vertical_lines: # loop through lines instead?
+            # line = tuple(line[0])
+            # if line == horizontal_line:
+            #     continue
+            if is_corner(horizontal_line, line):
+                # hx1, hy1, hx2, hy2 = horizontal_line
+                # cv.line(output_frame, (hx1, hy1), (hx2, hy2), (255, 255, 0), 2)
+                connected_lines.append(line)
+        if len(connected_lines) >= 2:
+            possible_lines = connected_lines
+            # Draw horizontal_line blue
+            hx1, hy1, hx2, hy2 = horizontal_line
+            cv.line(output_frame, (hx1, hy1), (hx2, hy2), (255, 255, 0), 2)
+            break
+
+    if len(possible_lines) < 2:
         return None, frame
 
     # Take leftmost and rightmost as runway edges
     # sort using average of x1 and x2
-    vertical_lines = sorted(vertical_lines, key=lambda L: (L[0] + L[2]) / 2.0)
-    left = vertical_lines[0]
-    right = vertical_lines[-1]
+    possible_lines = sorted(possible_lines, key=lambda L: (L[0] + L[2]) / 2.0)
+    left = possible_lines[0]
+    right = possible_lines[-1]
 
     # Draw runway edges green
     cv.line(output_frame, (left[0], left[1]), (left[2], left[3]), (0, 255, 0), 2)
