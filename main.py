@@ -27,41 +27,59 @@ def compute_lateral_error(left, right, frame_width, ref_y):
 def detect_runway_edges(frame):
     # Preprocess
     gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-    blur = cv.GaussianBlur(gray, (5, 5), 0)
+    blur = cv.GaussianBlur(gray, (5, 5), 0) # 0 means OpenCV auto picks sigma
 
     # Edge detection on whole image
+    # lower and upper thresholds for hysteresis procedure
+    # if greater than upper threshold than it is definitely an edge
+    # if lower than lower threshold it is not an edge and discarded
+    # if in between thresholds then it is weak edge and only kept if connected to strong edge
     edges = cv.Canny(blur, 50, 150)
+    # debug
+    cv.imshow("Edges", edges)
 
     # Hough line detection
     lines = cv.HoughLinesP(
         edges,
-        rho=1,
-        theta=np.pi/180,
-        threshold=100,
-        minLineLength=100,
-        maxLineGap=20,
+        rho=1, # consider distances in steps of 1 pixel
+        theta=np.pi/180, # 1 degree steps
+        threshold=100, # num of votes
+        minLineLength=100, # pixels
+        maxLineGap=20, # gap between two collinear segments
     )
 
     if lines is None:
         return None, frame
 
+    output_frame = frame.copy()
     vertical_lines = []
+    horizontal_lines = []
     for line in lines:
         x1, y1, x2, y2 = line[0]
-        # find near vertical lines
-        if abs(x2 - x1) < abs(y2 - y1) * 0.5:
+        # find vertical lines using check: |dy|/|dx| > slope
+        # use 3 for strict vertical, lower to allow more slant
+        slope = 1.25
+        if abs(y2 - y1) > abs(x2 -x1) * slope:
+            # line is vertical
             vertical_lines.append((x1, y1, x2, y2))
+            # draw it blue
+            cv.line(output_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+        else:
+            # line is horizontal
+            horizontal_lines.append((x1, y1, x2, y2))
+            # draw it red
+            cv.line(output_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
     if len(vertical_lines) < 2:
         return None, frame
 
     # Take leftmost and rightmost as runway edges
+    # sort using average of x1 and x2
     vertical_lines = sorted(vertical_lines, key=lambda L: (L[0] + L[2]) / 2.0)
     left = vertical_lines[0]
     right = vertical_lines[-1]
 
-    output_frame = frame.copy()
-    # Draw runway edges
+    # Draw runway edges green
     cv.line(output_frame, (left[0], left[1]), (left[2], left[3]), (0, 255, 0), 2)
     cv.line(output_frame, (right[0], right[1]), (right[2], right[3]), (0, 255, 0), 2)
 
@@ -89,11 +107,11 @@ while True:
         left, right = runway_edges
 
         # Calculate lateral deviation at ref_y
-        ref_y = int(h * 0.5)
+        ref_y = int(h * 0.5) # use middle y-axis
         lat_err = compute_lateral_error(left, right, w, ref_y)
 
         # Display reference line
-        cv.line(display_frame, (0, ref_y), (w, ref_y), (255, 0, 0), 1)
+        # cv.line(display_frame, (0, ref_y), (w, ref_y), (255, 0, 0), 1)
         # Display lateral deviation
         cv.putText(display_frame, f"Lateral error: {lat_err:+.2f} RW widths",
                     (20, 40), cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
