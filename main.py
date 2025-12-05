@@ -1,5 +1,6 @@
 import cv2 as cv
 import numpy as np
+import time
 
 def line_x_at_y(x1, y1, x2, y2, y):
     if y2 == y1:
@@ -116,7 +117,23 @@ while True:
         cv.putText(display_frame, f"Lateral error: {lat_err:+.2f} RW widths",
                     (20, 40), cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
+        # Display color for demo
+        sample_y = int((left[1] + left[3]) / 2.0) # average y values
+        sample_x = int((left[0] + left[2]) / 2.0) + 5
+        b, g, r = frame[sample_y, sample_x]
+        cv.circle(display_frame, (sample_x, sample_y), radius=4, color=(0, 0, 255), thickness=-1)
+        cv.putText(display_frame, f"Left R:{r} G:{g} B:{b}",
+                   (20,100), cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+        sample_y = int((right[1] + right[3]) / 2.0)  # average y values
+        sample_x = int((right[0] + right[2]) / 2.0) - 5
+        b, g, r = frame[sample_y, sample_x]
+        cv.circle(display_frame, (sample_x, sample_y), radius=4, color=(0, 0, 255), thickness=-1)
+        cv.putText(display_frame, f"Right R:{r} G:{g} B:{b}",
+                   (20, 150), cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
     cv.imshow("Visual Runway Alignment Assist", display_frame)
+    time.sleep(0.5)
     if cv.waitKey(1) == ord('q'):  # q to quit
         break
 
