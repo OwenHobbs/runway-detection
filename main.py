@@ -1,40 +1,78 @@
 import cv2 as cv
 import numpy as np
+import math
 
 def line_x_at_y(x1, y1, x2, y2, y):
-    if y2 == y1:
-        return (x1 + x2) / 2.0
+    if y2 == y1: # if line is perfectly horizontal
+        return (x1 + x2) / 2.0 # use midpoint of x
+    # consider parameter t
+    # x(t) = x1 + t(x2 - x1)
+    # y(t) = y1 + t(y2 - y1)
+    # use y to solve for parameter t
     t = (y - y1) / (y2 - y1)
+    # use parameter t to solve for x
     return x1 + t * (x2 - x1)
 
-def compute_lateral_error(left, right, frame_width, ref_y):
+def compute_lateral_error(left, right, frame_width, ref_y, hfov_deg):
     x1L, y1L, x2L, y2L = left
     x1R, y1R, x2R, y2R = right
 
     xL = line_x_at_y(x1L, y1L, x2L, y2L, ref_y)
     xR = line_x_at_y(x1R, y1R, x2R, y2R, ref_y)
 
-    centerline_x = 0.5 * (xL + xR)
-    image_center_x = frame_width / 2.0
-
-    half_width = 0.5 * (xR - xL)
-    if half_width == 0:
+    runway_width = xR - xL
+    if runway_width == 0:
         return 0.0
+    centerline_x = (xL + xR) / 2.0 # average of xL and xR
+    image_center_x = frame_width / 2.0
+    dx_pixels = image_center_x - centerline_x
 
-    lateral_error_norm = (image_center_x - centerline_x) / half_width
-    return lateral_error_norm  # +1 = 1 runway-width right, -1 = left
+    # lateral error in runway widths
+    # +1 = 1 runway-width right, -1 = left
+    lateral_error_rw = dx_pixels / runway_width
 
-def is_coincident(x1, y1, x2, y2, threshold=10.0):
-    return abs(x2 - x1) < threshold and abs(y2 - y1) < threshold
+    hfov_rad = math.radians(hfov_deg)
+    # compute focal length in pixels from hfov
+    fx = (frame_width / 2.0) / math.tan(hfov_rad / 2.0)
 
-def is_corner(line1, line2, threshold=10.0):
+    lat_err_rad = math.atan(dx_pixels / fx)
+    lat_err_deg = math.degrees(lat_err_rad)
+
+    return lateral_error_rw, lat_err_deg
+
+# def is_coincident(x1, y1, x2, y2, threshold=10.0):
+#     return abs(x2 - x1) < threshold and abs(y2 - y1) < threshold
+#
+# def is_corner(line1, line2, threshold=10.0):
+#     x1, y1, x2, y2 = line1
+#     x3, y3, x4, y4 = line2
+#     if is_coincident(x1, y1, x3, y3, threshold): return True
+#     if is_coincident(x1, y1, x4, y4, threshold): return True
+#     if is_coincident(x2, y2, x3, y3, threshold): return True
+#     if is_coincident(x2, y2, x4, y4, threshold): return True
+#     return False
+
+def is_perpendicular(line1, line2, angle_tolerance_deg=15.0):
     x1, y1, x2, y2 = line1
     x3, y3, x4, y4 = line2
-    if is_coincident(x1, y1, x3, y3, threshold): return True
-    if is_coincident(x1, y1, x4, y4, threshold): return True
-    if is_coincident(x2, y2, x3, y3, threshold): return True
-    if is_coincident(x2, y2, x4, y4, threshold): return True
-    return False
+
+    dx1, dy1 = x2 - x1, y2 - y1
+    dx2, dy2 = x4 - x3, y4 - y3
+
+    mag1 = math.hypot(dx1, dy1)
+    mag2 = math.hypot(dx2, dy2)
+    if mag1 == 0 or mag2 == 0:
+        return False
+
+    # cos(theta) = (v1·v2)/(|v1||v2|)
+    dot_product = dx1 * dx2 + dy1 * dy2
+    cos_theta = dot_product / (mag1 * mag2)
+
+    # Clamp cos_theta [-1.0, 1.0] to use inverse cos
+    cos_theta = max(-1.0, min(1.0, cos_theta))
+    theta = math.degrees(math.acos(cos_theta))
+
+    return abs(theta - 90.0) <= angle_tolerance_deg
 
 def detect_runway_edges(frame):
     # Preprocess
@@ -75,12 +113,12 @@ def detect_runway_edges(frame):
             # line is vertical
             vertical_lines.append((x1, y1, x2, y2))
             # draw it blue
-            # cv.line(output_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+            cv.line(output_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
         else:
             # line is horizontal
             horizontal_lines.append((x1, y1, x2, y2))
             # draw it red
-            # cv.line(output_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv.line(output_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
     # sort horizontal_lines using average of y1 and y2
     horizontal_lines = sorted(horizontal_lines, key=lambda L: (L[1] + L[3]) / 2.0, reverse=True)
@@ -89,11 +127,11 @@ def detect_runway_edges(frame):
     possible_lines = []
     for horizontal_line in horizontal_lines:
         connected_lines = [] # reset
-        for line in vertical_lines: # loop through lines instead?
-            # line = tuple(line[0])
-            # if line == horizontal_line:
-            #     continue
-            if is_corner(horizontal_line, line):
+        for line in lines: # loop through lines instead?
+            line = tuple(line[0])
+            if line == horizontal_line:
+                continue
+            if is_perpendicular(horizontal_line, line):
                 # hx1, hy1, hx2, hy2 = horizontal_line
                 # cv.line(output_frame, (hx1, hy1), (hx2, hy2), (255, 255, 0), 2)
                 connected_lines.append(line)
@@ -125,6 +163,8 @@ if not cap.isOpened():
     print("Cannot open camera")
     exit()
 
+lat_err_rw = 0
+lat_err_deg = 0
 while True:
     # capture frame-by-frame
     ret, frame = cap.read()
@@ -142,13 +182,14 @@ while True:
 
         # Calculate lateral deviation at ref_y
         ref_y = int(h * 0.5) # use middle y-axis
-        lat_err = compute_lateral_error(left, right, w, ref_y)
+        lat_err_rw, lat_err_deg = compute_lateral_error(left, right, w, ref_y, hfov_deg=70)
 
         # Display reference line
         # cv.line(display_frame, (0, ref_y), (w, ref_y), (255, 0, 0), 1)
-        # Display lateral deviation
-        cv.putText(display_frame, f"Lateral error: {lat_err:+.2f} RW widths",
-                    (20, 40), cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+    # Display lateral deviation
+    cv.putText(display_frame, f"Lateral error: {lat_err_rw:+.2f} RW widths, {lat_err_deg:+.1f} deg",
+                (20, 40), cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
     cv.imshow("Visual Runway Alignment Assist", display_frame)
     if cv.waitKey(1) == ord('q'):  # q to quit
