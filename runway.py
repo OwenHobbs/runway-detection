@@ -21,9 +21,13 @@ def compute_lateral_error(left_x, right_x, frame_width, hfov_deg):
 
     return lateral_error_rw, lat_err_deg
 
-def compute_vertical_error(base_y, frame_height, ideal_base_y_frac):
+def compute_vertical_error(base_y, frame_height, ideal_base_y_frac, vfov_deg):
     ideal_base_y = frame_height * ideal_base_y_frac
 
-    # TODO: improve
-    vert_err = (base_y - ideal_base_y)
-    return vert_err
+    vert_err_px = base_y - ideal_base_y
+
+    # use linear estimate (TODO: or use focal length?)
+    deg_per_px = vfov_deg / frame_height
+    vert_err_deg = deg_per_px * vert_err_px
+
+    return vert_err_px, vert_err_deg
